@@ -149,7 +149,7 @@ const TrashBinSvg = ({
 export default function App() {
   const [classifier, setClassifier] = useState<any>(null);
   const [modelLoadingProgress, setModelLoadingProgress] = useState<string>("Mô hình AI đang khởi động...");
-  const [useSimulatedAI, setUseSimulatedAI] = useState<boolean>(false);
+  const [useSimulatedAI, setUseSimulatedAI] = useState<boolean>(true);
   const [selectedPreset, setSelectedPreset] = useState<string | null>(null);
   const [modelError, setModelError] = useState<string | null>(null);
 
@@ -568,6 +568,15 @@ export default function App() {
               <span className="text-base">🔥</span>
               <span className="font-extrabold text-xs text-orange-950 uppercase">Chuỗi: {streak}</span>
             </div>
+            <button 
+              onClick={() => setUseSimulatedAI(!useSimulatedAI)}
+              className={`border-2 border-black px-3 py-1.5 rounded-xl text-xs font-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] hover:scale-102 active:translate-y-0.5 transition-all uppercase cursor-pointer ${
+                useSimulatedAI ? "bg-amber-400 hover:bg-amber-300 text-black animate-pulse" : "bg-emerald-400 hover:bg-emerald-300 text-black"
+              }`}
+              title={useSimulatedAI ? "Chuyển sang chế độ nhận diện bằng mô hình AI thực tế" : "Chuyển sang chế độ chạy mô phỏng không cần AI"}
+            >
+              {useSimulatedAI ? "🤖 Chế độ mô phỏng" : "🧠 Chế độ AI"}
+            </button>
             <button 
               onClick={clearEverything}
               className="bg-stone-100 hover:bg-stone-50 text-stone-800 border-2 border-black px-3 py-1.5 rounded-xl text-xs font-extrabold shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] hover:scale-102 active:translate-y-0.5 transition-all uppercase cursor-pointer"
