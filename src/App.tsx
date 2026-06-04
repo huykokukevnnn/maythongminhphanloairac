@@ -148,6 +148,7 @@ const TrashBinSvg = ({
 
 export default function App() {
   const [classifier, setClassifier] = useState<any>(null);
+  const [fruitClassifier, setFruitClassifier] = useState<any>(null);
   const [modelLoadingProgress, setModelLoadingProgress] = useState<string>("Mô hình AI đang khởi động...");
   const [useSimulatedAI, setUseSimulatedAI] = useState<boolean>(false);
   const [selectedPreset, setSelectedPreset] = useState<string | null>(null);
@@ -158,11 +159,14 @@ export default function App() {
   useEffect(() => {
     async function initClassifier() {
       try {
-        const modelURL = "/model/model.json";
-        const metadataURL = "/model/metadata.json";
-        setModelLoadingProgress("Đang tải mô hình Teachable Machine...");
-        const model = await tmImage.load(modelURL, metadataURL);
+        setModelLoadingProgress("Đang tải mô hình Phân loại rác...");
+        const model = await tmImage.load("/model/model.json", "/model/metadata.json");
         setClassifier(() => model);
+
+        setModelLoadingProgress("Đang tải mô hình Nhận diện trái cây...");
+        const fModel = await tmImage.load("/fruit_model/model.json", "/fruit_model/metadata.json");
+        setFruitClassifier(() => fModel);
+
         setModelLoadingProgress("Mô hình AI đã sẵn sàng!");
       } catch (err: any) {
         console.error("Failed to load model:", err);
@@ -329,7 +333,7 @@ export default function App() {
           explanation: explanationTemplates[randomType]
         };
       } else {
-        if (!classifier) {
+        if (!classifier || !fruitClassifier) {
           throw new Error("Mô hình AI chưa sẵn sàng. Vui lòng tải lại trang hoặc đợi trong giây lát.");
         }
 
@@ -341,20 +345,46 @@ export default function App() {
           imgElement.onerror = () => reject(new Error("Không thể nạp dữ liệu hình ảnh vào mô hình."));
         });
 
-        // Run Teachable Machine image classification
-        const predictions = await classifier.predict(imgElement);
-        if (!predictions || predictions.length === 0) {
-          throw new Error("Không nhận diện được vật thể từ mô hình Teachable Machine.");
+        // Run both General Waste model and Fruit model predictions
+        const generalPredictions = await classifier.predict(imgElement);
+        const fruitPredictions = await fruitClassifier.predict(imgElement);
+
+        if (!generalPredictions || generalPredictions.length === 0) {
+          throw new Error("Không nhận diện được vật thể từ mô hình AI.");
         }
 
-        // Sort by probability and get the highest confidence label
-        predictions.sort((a: any, b: any) => b.probability - a.probability);
-        const topResult = predictions[0];
-        
+        // Sort both prediction lists descending by probability
+        generalPredictions.sort((a: any, b: any) => b.probability - a.probability);
+        fruitPredictions.sort((a: any, b: any) => b.probability - a.probability);
+
+        const topGeneral = generalPredictions[0];
+        const topFruit = fruitPredictions[0];
+
+        let topResult;
+        let isFruitResult = false;
+
+        // Ensemble logic: Compare confidence scores.
+        // If the specialized fruit model is highly confident (> 50%) and has more confidence
+        // than the general waste model, classify it as fruit (Hữu cơ).
+        if (topFruit && topFruit.probability > 0.50 && topFruit.probability > topGeneral.probability) {
+          topResult = topFruit;
+          isFruitResult = true;
+        } else {
+          topResult = topGeneral;
+        }
+
         setRawPrediction(`${topResult.className} (${(topResult.probability * 100).toFixed(0)}%)`);
-        
-        // Map the class name using our helper
-        mappedResult = mapLabelToBin(topResult.className);
+
+        if (isFruitResult) {
+          // All classes in fruit model are fruits (Apple, Banana, Orange) -> Organic (Hữu cơ)
+          mappedResult = {
+            bin_type: "hữu cơ" as const,
+            explanation: "Đây là thùng rác Hữu cơ dùng để chứa các loại rác dễ phân hủy để ủ thành phân bón cho cây trồng."
+          };
+        } else {
+          // Map the general waste class name using our helper
+          mappedResult = mapLabelToBin(topResult.className);
+        }
       }
 
       setClassification({
