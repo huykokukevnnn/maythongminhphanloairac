@@ -9,7 +9,7 @@ import {
   Flame,
   Star
 } from "lucide-react";
-import { pipeline, env } from "@huggingface/transformers";
+import * as tmImage from "@teachablemachine/image";
 import { mapLabelToBin } from "./imagenet_classes";
 
 interface ClassificationResult {
@@ -157,22 +157,15 @@ export default function App() {
   useEffect(() => {
     async function initClassifier() {
       try {
-        env.allowLocalModels = false;
-        // Load ONNX WASM binaries from local path on our own domain instead of CDN (which is blocked in Vietnam)
-        env.backends.onnx.wasm.wasmPaths = "/";
-        const pipe = await pipeline("image-classification", "Xenova/mobilenet_v1_1.0_224", {
-          progress_callback: (data: any) => {
-            if (data.status === "progress") {
-              setModelLoadingProgress(`Đang tải mô hình AI: ${data.progress.toFixed(0)}%`);
-            } else if (data.status === "ready") {
-              setModelLoadingProgress("Mô hình AI đã sẵn sàng!");
-            }
-          }
-        });
-        setClassifier(() => pipe);
+        const modelURL = "/model/model.json";
+        const metadataURL = "/model/metadata.json";
+        setModelLoadingProgress("Đang tải mô hình Teachable Machine...");
+        const model = await tmImage.load(modelURL, metadataURL);
+        setClassifier(() => model);
+        setModelLoadingProgress("Mô hình AI đã sẵn sàng!");
       } catch (err: any) {
         console.error("Failed to load model:", err);
-        setModelError(err.message || String(err));
+        setModelError("Không tìm thấy tệp mô hình Teachable Machine tại thư mục /public/model/ hoặc gặp lỗi kết nối. Bạn có thể bấm 'Chạy chế độ mô phỏng' để trải nghiệm thử ứng dụng.");
       }
     }
     initClassifier();
@@ -336,14 +329,26 @@ export default function App() {
           throw new Error("Mô hình AI chưa sẵn sàng. Vui lòng tải lại trang hoặc đợi trong giây lát.");
         }
 
-        // Run local client-side prediction
-        const results = await classifier(picData);
-        if (!results || results.length === 0) {
-          throw new Error("Không tìm thấy kết quả nhận diện từ mô hình.");
+        // Convert base64 data to an HTML Image element to pass to Teachable Machine
+        const imgElement = new Image();
+        imgElement.src = picData;
+        await new Promise((resolve, reject) => {
+          imgElement.onload = resolve;
+          imgElement.onerror = () => reject(new Error("Không thể nạp dữ liệu hình ảnh vào mô hình."));
+        });
+
+        // Run Teachable Machine image classification
+        const predictions = await classifier.predict(imgElement);
+        if (!predictions || predictions.length === 0) {
+          throw new Error("Không nhận diện được vật thể từ mô hình Teachable Machine.");
         }
 
-        const topResult = results[0];
-        mappedResult = mapLabelToBin(topResult.label);
+        // Sort by probability and get the highest confidence label
+        predictions.sort((a: any, b: any) => b.probability - a.probability);
+        const topResult = predictions[0];
+        
+        // Map the class name using our helper
+        mappedResult = mapLabelToBin(topResult.className);
       }
 
       setClassification({
@@ -529,7 +534,7 @@ export default function App() {
                   {modelLoadingProgress}
                 </p>
                 <p className="text-xs text-stone-500 max-w-xs text-center font-bold px-4">
-                  Hệ thống đang tải mô hình xử lý hình ảnh AI (~17MB) về trình duyệt của bạn để phân tích ngoại tuyến hoàn toàn miễn phí!
+                  Hệ thống đang tải mô hình xử lý hình ảnh Teachable Machine (~5MB - 10MB) về trình duyệt của bạn để phân tích ngoại tuyến hoàn toàn miễn phí!
                 </p>
                 <button 
                   onClick={() => setUseSimulatedAI(true)}

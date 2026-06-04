@@ -12,7 +12,27 @@ const EXPLANATIONS = {
 };
 
 export function mapLabelToBin(label: string): ClassificationResult {
-  const cleanLabel = label.toLowerCase();
+  const cleanLabel = label.toLowerCase().trim();
+
+  // Direct category matching (for Teachable Machine generic classes)
+  if (cleanLabel.includes("hữu cơ") || cleanLabel.includes("huu_co") || cleanLabel.includes("huuco") || cleanLabel.includes("organic")) {
+    return {
+      bin_type: "hữu cơ",
+      explanation: EXPLANATIONS["hữu cơ"]
+    };
+  }
+  if (cleanLabel.includes("tái chế") || cleanLabel.includes("tai_che") || cleanLabel.includes("taiche") || cleanLabel.includes("recycle") || cleanLabel.includes("recyclable")) {
+    return {
+      bin_type: "tái chế",
+      explanation: EXPLANATIONS["tái chế"]
+    };
+  }
+  if (cleanLabel.includes("vô cơ") || cleanLabel.includes("vo_co") || cleanLabel.includes("voco") || cleanLabel.includes("inorganic") || cleanLabel.includes("trash") || cleanLabel.includes("garbage")) {
+    return {
+      bin_type: "vô cơ",
+      explanation: EXPLANATIONS["vô cơ"]
+    };
+  }
 
   // 1. Organic keywords (Rác hữu cơ)
   const organicKeywords = [
