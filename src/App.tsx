@@ -149,6 +149,9 @@ const TrashBinSvg = ({
 export default function App() {
   const [classifier, setClassifier] = useState<any>(null);
   const [modelLoadingProgress, setModelLoadingProgress] = useState<string>("Mô hình AI đang khởi động...");
+  const [useSimulatedAI, setUseSimulatedAI] = useState<boolean>(false);
+  const [selectedPreset, setSelectedPreset] = useState<string | null>(null);
+  const [modelError, setModelError] = useState<string | null>(null);
 
   // Load model once on mount
   useEffect(() => {
@@ -169,7 +172,7 @@ export default function App() {
         setClassifier(() => pipe);
       } catch (err: any) {
         console.error("Failed to load model:", err);
-        setAnalysisError("Lỗi tải mô hình AI. Vui lòng kiểm tra lại kết nối mạng.");
+        setModelError(err.message || String(err));
       }
     }
     initClassifier();
@@ -294,18 +297,54 @@ export default function App() {
 
     setIsAnalyzing(true);
     try {
-      if (!classifier) {
-        throw new Error("Mô hình AI chưa sẵn sàng. Vui lòng tải lại trang hoặc đợi trong giây lát.");
-      }
+      let mappedResult;
 
-      // Run local client-side prediction
-      const results = await classifier(picData);
-      if (!results || results.length === 0) {
-        throw new Error("Không tìm thấy kết quả nhận diện từ mô hình.");
-      }
+      if (useSimulatedAI) {
+        // Simulated AI mapping for presets and webcam
+        if (selectedPreset) {
+          if (selectedPreset.startsWith("organic")) {
+            mappedResult = {
+              bin_type: "hữu cơ" as const,
+              explanation: "Đây là thùng rác Hữu cơ dùng để chứa các loại rác dễ phân hủy để ủ thành phân bón cho cây trồng."
+            };
+          } else if (selectedPreset.startsWith("recycle")) {
+            mappedResult = {
+              bin_type: "tái chế" as const,
+              explanation: "Đây là thùng rác Tái chế dùng để chứa các nguyên liệu có thể tái sản xuất để giảm thiểu rác thải và bảo vệ môi trường."
+            };
+          } else {
+            mappedResult = {
+              bin_type: "vô cơ" as const,
+              explanation: "Đây là thùng rác Vô cơ dùng để chứa các loại rác không thể tái chế hoặc phân hủy để mang đi chôn lấp hoặc xử lý an toàn."
+            };
+          }
+        } else {
+          const types = ["tái chế", "hữu cơ", "vô cơ"] as const;
+          const randomType = types[Math.floor(Math.random() * types.length)];
+          const explanationTemplates = {
+            "tái chế": "Đây là thùng rác Tái chế dùng để chứa các nguyên liệu có thể tái sản xuất để giảm thiểu rác thải và bảo vệ môi trường. (Chế độ mô phỏng)",
+            "hữu cơ": "Đây là thùng rác Hữu cơ dùng để chứa các loại rác dễ phân hủy để ủ thành phân bón cho cây trồng. (Chế độ mô phỏng)",
+            "vô cơ": "Đây là thùng rác Vô cơ dùng để chứa các loại rác không thể tái chế hoặc phân hủy để mang đi chôn lấp hoặc xử lý an toàn. (Chế độ mô phỏng)"
+          };
+          mappedResult = {
+            bin_type: randomType,
+            explanation: explanationTemplates[randomType]
+          };
+        }
+      } else {
+        if (!classifier) {
+          throw new Error("Mô hình AI chưa sẵn sàng. Vui lòng tải lại trang hoặc đợi trong giây lát.");
+        }
 
-      const topResult = results[0];
-      const mappedResult = mapLabelToBin(topResult.label);
+        // Run local client-side prediction
+        const results = await classifier(picData);
+        if (!results || results.length === 0) {
+          throw new Error("Không tìm thấy kết quả nhận diện từ mô hình.");
+        }
+
+        const topResult = results[0];
+        mappedResult = mapLabelToBin(topResult.label);
+      }
 
       setClassification({
         bin_type: mappedResult.bin_type,
@@ -413,6 +452,7 @@ export default function App() {
     ctx.textBaseline = "middle";
     ctx.fillText(emoji, 150, 150);
 
+    setSelectedPreset(item);
     setCapturedImage(canvas.toDataURL("image/jpeg", 0.9));
     setClassification(null);
     setAnalysisError(null);
@@ -455,18 +495,50 @@ export default function App() {
         )}
 
         {/* Full-screen Model Loading Overlay */}
-        {!classifier && (
+        {!classifier && !useSimulatedAI && (
           <div className="absolute inset-0 bg-[#f0fdf4]/98 backdrop-blur-lg z-50 flex flex-col items-center justify-center gap-5 animate-fade-in" id="model-loading-overlay">
             <div className="relative">
               <div className="w-28 h-28 sm:w-32 sm:h-32 border-[10px] border-emerald-100 border-t-emerald-500 rounded-full animate-spin shadow-lg"></div>
               <div className="absolute inset-0 flex items-center justify-center text-5xl sm:text-6xl animate-bounce">🤖</div>
             </div>
-            <p className="text-xl sm:text-2xl font-black text-emerald-950 text-center max-w-sm sm:max-w-xl px-6 leading-normal uppercase tracking-wider">
-              {modelLoadingProgress}
-            </p>
-            <p className="text-xs text-stone-500 max-w-xs text-center font-bold px-4">
-              Hệ thống đang tải mô hình xử lý hình ảnh AI (~17MB) về trình duyệt của bạn để phân tích ngoại tuyến hoàn toàn miễn phí!
-            </p>
+            
+            {modelError ? (
+              <div className="flex flex-col items-center gap-4 max-w-md px-6 text-center">
+                <p className="text-xl font-black text-red-600 uppercase">Lỗi tải mô hình AI</p>
+                <p className="text-xs text-stone-700 font-bold bg-red-50 border border-red-200 p-3 rounded-xl max-h-36 overflow-y-auto w-full">
+                  {modelError}
+                </p>
+                <div className="flex gap-3 mt-2">
+                  <button 
+                    onClick={() => window.location.reload()}
+                    className="bg-emerald-500 hover:bg-emerald-400 text-white border-2 border-black font-black text-xs py-2 px-4 rounded-xl shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5 transition-all cursor-pointer"
+                  >
+                    Thử lại
+                  </button>
+                  <button 
+                    onClick={() => setUseSimulatedAI(true)}
+                    className="bg-amber-400 hover:bg-amber-300 text-black border-2 border-black font-black text-xs py-2 px-4 rounded-xl shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5 transition-all cursor-pointer"
+                  >
+                    Chạy chế độ mô phỏng
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <p className="text-xl sm:text-2xl font-black text-emerald-950 text-center max-w-sm sm:max-w-xl px-6 leading-normal uppercase tracking-wider">
+                  {modelLoadingProgress}
+                </p>
+                <p className="text-xs text-stone-500 max-w-xs text-center font-bold px-4">
+                  Hệ thống đang tải mô hình xử lý hình ảnh AI (~17MB) về trình duyệt của bạn để phân tích ngoại tuyến hoàn toàn miễn phí!
+                </p>
+                <button 
+                  onClick={() => setUseSimulatedAI(true)}
+                  className="mt-2 bg-amber-400 hover:bg-amber-300 text-black border-2 border-black font-black text-xs py-2.5 px-5 rounded-xl shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5 transition-all cursor-pointer uppercase"
+                >
+                  Bỏ qua & Chạy mô phỏng (Không cần AI)
+                </button>
+              </>
+            )}
           </div>
         )}
         
