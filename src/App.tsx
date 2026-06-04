@@ -152,6 +152,7 @@ export default function App() {
   const [useSimulatedAI, setUseSimulatedAI] = useState<boolean>(false);
   const [selectedPreset, setSelectedPreset] = useState<string | null>(null);
   const [modelError, setModelError] = useState<string | null>(null);
+  const [rawPrediction, setRawPrediction] = useState<string | null>(null);
 
   // Load model once on mount
   useEffect(() => {
@@ -292,38 +293,41 @@ export default function App() {
     try {
       let mappedResult;
 
-      if (useSimulatedAI) {
-        // Simulated AI mapping for presets and webcam
-        if (selectedPreset) {
-          if (selectedPreset.startsWith("organic")) {
-            mappedResult = {
-              bin_type: "hữu cơ" as const,
-              explanation: "Đây là thùng rác Hữu cơ dùng để chứa các loại rác dễ phân hủy để ủ thành phân bón cho cây trồng."
-            };
-          } else if (selectedPreset.startsWith("recycle")) {
-            mappedResult = {
-              bin_type: "tái chế" as const,
-              explanation: "Đây là thùng rác Tái chế dùng để chứa các nguyên liệu có thể tái sản xuất để giảm thiểu rác thải và bảo vệ môi trường."
-            };
-          } else {
-            mappedResult = {
-              bin_type: "vô cơ" as const,
-              explanation: "Đây là thùng rác Vô cơ dùng để chứa các loại rác không thể tái chế hoặc phân hủy để mang đi chôn lấp hoặc xử lý an toàn."
-            };
-          }
-        } else {
-          const types = ["tái chế", "hữu cơ", "vô cơ"] as const;
-          const randomType = types[Math.floor(Math.random() * types.length)];
-          const explanationTemplates = {
-            "tái chế": "Đây là thùng rác Tái chế dùng để chứa các nguyên liệu có thể tái sản xuất để giảm thiểu rác thải và bảo vệ môi trường. (Chế độ mô phỏng)",
-            "hữu cơ": "Đây là thùng rác Hữu cơ dùng để chứa các loại rác dễ phân hủy để ủ thành phân bón cho cây trồng. (Chế độ mô phỏng)",
-            "vô cơ": "Đây là thùng rác Vô cơ dùng để chứa các loại rác không thể tái chế hoặc phân hủy để mang đi chôn lấp hoặc xử lý an toàn. (Chế độ mô phỏng)"
-          };
+      // If it's a preset item (from the "Vật mẫu" tab), bypass AI prediction
+      // because 2D canvas emojis are not recognized by real camera-trained models.
+      // This ensures presets always output 100% correct answers.
+      if (activeTab === "presets" && selectedPreset) {
+        setRawPrediction("Vật mẫu: " + selectedPreset.split('_').slice(1).join(' '));
+        if (selectedPreset.startsWith("organic")) {
           mappedResult = {
-            bin_type: randomType,
-            explanation: explanationTemplates[randomType]
+            bin_type: "hữu cơ" as const,
+            explanation: "Đây là thùng rác Hữu cơ dùng để chứa các loại rác dễ phân hủy để ủ thành phân bón cho cây trồng."
+          };
+        } else if (selectedPreset.startsWith("recycle")) {
+          mappedResult = {
+            bin_type: "tái chế" as const,
+            explanation: "Đây là thùng rác Tái chế dùng để chứa các nguyên liệu có thể tái sản xuất để giảm thiểu rác thải và bảo vệ môi trường."
+          };
+        } else {
+          mappedResult = {
+            bin_type: "vô cơ" as const,
+            explanation: "Đây là thùng rác Vô cơ dùng để chứa các loại rác không thể tái chế hoặc phân hủy để mang đi chôn lấp hoặc xử lý an toàn."
           };
         }
+      } else if (useSimulatedAI) {
+        // Simulated AI mapping for webcam (random / cycle)
+        setRawPrediction("Mô phỏng (Simulation)");
+        const types = ["tái chế", "hữu cơ", "vô cơ"] as const;
+        const randomType = types[Math.floor(Math.random() * types.length)];
+        const explanationTemplates = {
+          "tái chế": "Đây là thùng rác Tái chế dùng để chứa các nguyên liệu có thể tái sản xuất để giảm thiểu rác thải và bảo vệ môi trường. (Chế độ mô phỏng)",
+          "hữu cơ": "Đây là thùng rác Hữu cơ dùng để chứa các loại rác dễ phân hủy để ủ thành phân bón cho cây trồng. (Chế độ mô phỏng)",
+          "vô cơ": "Đây là thùng rác Vô cơ dùng để chứa các loại rác không thể tái chế hoặc phân hủy để mang đi chôn lấp hoặc xử lý an toàn. (Chế độ mô phỏng)"
+        };
+        mappedResult = {
+          bin_type: randomType,
+          explanation: explanationTemplates[randomType]
+        };
       } else {
         if (!classifier) {
           throw new Error("Mô hình AI chưa sẵn sàng. Vui lòng tải lại trang hoặc đợi trong giây lát.");
@@ -346,6 +350,8 @@ export default function App() {
         // Sort by probability and get the highest confidence label
         predictions.sort((a: any, b: any) => b.probability - a.probability);
         const topResult = predictions[0];
+        
+        setRawPrediction(`${topResult.className} (${(topResult.probability * 100).toFixed(0)}%)`);
         
         // Map the class name using our helper
         mappedResult = mapLabelToBin(topResult.className);
@@ -902,6 +908,7 @@ export default function App() {
                 <div className="relative flex flex-col items-center w-full">
                   {classification?.bin_type === "vô cơ" && !isAnalyzing && (
                     <div className="absolute bottom-[108%] left-1/2 -translate-x-1/2 w-48 md:w-64 bg-amber-50 border-3 border-black p-3 rounded-2xl shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] text-[10px] md:text-xs font-black text-slate-950 z-30 animate-bounce leading-relaxed text-center">
+                      {rawPrediction && <p className="text-[9px] text-amber-600 font-extrabold border-b border-black/10 pb-1 mb-1">AI nhận diện: {rawPrediction}</p>}
                       <p>{classification.explanation}</p>
                       <div className="absolute top-full left-1/2 -translate-x-1/2 border-[10px] border-transparent border-t-black mt-[-1.5px]" />
                       <div className="absolute top-full left-1/2 -translate-x-1/2 border-[8px] border-transparent border-t-amber-50 mt-[-3px]" />
@@ -918,6 +925,7 @@ export default function App() {
                 <div className="relative flex flex-col items-center w-full">
                   {classification?.bin_type === "tái chế" && !isAnalyzing && (
                     <div className="absolute bottom-[108%] left-1/2 -translate-x-1/2 w-48 md:w-64 bg-amber-50 border-3 border-black p-3 rounded-2xl shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] text-[10px] md:text-xs font-black text-slate-950 z-30 animate-bounce leading-relaxed text-center">
+                      {rawPrediction && <p className="text-[9px] text-amber-600 font-extrabold border-b border-black/10 pb-1 mb-1">AI nhận diện: {rawPrediction}</p>}
                       <p>{classification.explanation}</p>
                       <div className="absolute top-full left-1/2 -translate-x-1/2 border-[10px] border-transparent border-t-black mt-[-1.5px]" />
                       <div className="absolute top-full left-1/2 -translate-x-1/2 border-[8px] border-transparent border-t-amber-50 mt-[-3px]" />
@@ -947,6 +955,7 @@ export default function App() {
                 <div className="relative flex flex-col items-center w-full">
                   {classification?.bin_type === "hữu cơ" && !isAnalyzing && (
                     <div className="absolute bottom-[108%] left-1/2 -translate-x-1/2 w-48 md:w-64 bg-amber-50 border-3 border-black p-3 rounded-2xl shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] text-[10px] md:text-xs font-black text-slate-950 z-30 animate-bounce leading-relaxed text-center">
+                      {rawPrediction && <p className="text-[9px] text-amber-600 font-extrabold border-b border-black/10 pb-1 mb-1">AI nhận diện: {rawPrediction}</p>}
                       <p>{classification.explanation}</p>
                       <div className="absolute top-full left-1/2 -translate-x-1/2 border-[10px] border-transparent border-t-black mt-[-1.5px]" />
                       <div className="absolute top-full left-1/2 -translate-x-1/2 border-[8px] border-transparent border-t-amber-50 mt-[-3px]" />
