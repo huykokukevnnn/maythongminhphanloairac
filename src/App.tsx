@@ -10,6 +10,7 @@ import {
   Star
 } from "lucide-react";
 import * as tmImage from "@teachablemachine/image";
+import * as mobilenet from "@tensorflow-models/mobilenet";
 import { mapLabelToBin } from "./imagenet_classes";
 
 interface ClassificationResult {
@@ -149,6 +150,7 @@ const TrashBinSvg = ({
 export default function App() {
   const [classifier, setClassifier] = useState<any>(null);
   const [fruitClassifier, setFruitClassifier] = useState<any>(null);
+  const [mobilenetClassifier, setMobilenetClassifier] = useState<any>(null);
   const [modelLoadingProgress, setModelLoadingProgress] = useState<string>("Mô hình AI đang khởi động...");
   const [useSimulatedAI, setUseSimulatedAI] = useState<boolean>(false);
   const [selectedPreset, setSelectedPreset] = useState<string | null>(null);
@@ -166,6 +168,14 @@ export default function App() {
         setModelLoadingProgress("Đang tải mô hình Nhận diện trái cây...");
         const fModel = await tmImage.load("/fruit_model/model.json", "/fruit_model/metadata.json");
         setFruitClassifier(() => fModel);
+
+        setModelLoadingProgress("Đang tải mô hình Tổng hợp nâng cao...");
+        const mModel = await mobilenet.load({
+          version: 2,
+          alpha: 1.0,
+          modelUrl: "/mobilenet/model.json"
+        });
+        setMobilenetClassifier(() => mModel);
 
         setModelLoadingProgress("Mô hình AI đã sẵn sàng!");
       } catch (err: any) {
@@ -333,7 +343,7 @@ export default function App() {
           explanation: explanationTemplates[randomType]
         };
       } else {
-        if (!classifier || !fruitClassifier) {
+        if (!classifier || !fruitClassifier || !mobilenetClassifier) {
           throw new Error("Mô hình AI chưa sẵn sàng. Vui lòng tải lại trang hoặc đợi trong giây lát.");
         }
 
@@ -345,9 +355,10 @@ export default function App() {
           imgElement.onerror = () => reject(new Error("Không thể nạp dữ liệu hình ảnh vào mô hình."));
         });
 
-        // Run both General Waste model and Fruit model predictions
+        // Run predictions from General, Fruit and MobileNet models
         const generalPredictions = await classifier.predict(imgElement);
         const fruitPredictions = await fruitClassifier.predict(imgElement);
+        const mobilenetPredictions = await mobilenetClassifier.classify(imgElement);
 
         if (!generalPredictions || generalPredictions.length === 0) {
           throw new Error("Không nhận diện được vật thể từ mô hình AI.");
@@ -359,9 +370,11 @@ export default function App() {
 
         const topGeneral = generalPredictions[0];
         const topFruit = fruitPredictions[0];
+        const topMobilenet = mobilenetPredictions && mobilenetPredictions[0];
 
-        let topResult;
+        let topResult = topGeneral;
         let isFruitResult = false;
+        let isMobilenetOverride = false;
 
         // Ensemble logic: Compare confidence scores.
         // If the specialized fruit model is highly confident (> 50%) and has more confidence
@@ -369,17 +382,31 @@ export default function App() {
         if (topFruit && topFruit.probability > 0.50 && topFruit.probability > topGeneral.probability) {
           topResult = topFruit;
           isFruitResult = true;
-        } else {
-          topResult = topGeneral;
+        }
+
+        // Standard MobileNet v2 override for other organic items (melons, squashes, vegetables, etc.)
+        if (!isFruitResult && topMobilenet && topMobilenet.probability > 0.20) {
+          const mobilenetMapped = mapLabelToBin(topMobilenet.className);
+          if (mobilenetMapped.bin_type === "hữu cơ") {
+            const generalIsSynthetic = ["plastic bottle", "can", "plastic container", "styrofoam", "other plastic", "bottle cap", "blister pack", "plastic utensils", "plastic bag & wrapper", "glass"].some(kw => topGeneral.className.toLowerCase().includes(kw));
+            if (generalIsSynthetic || topMobilenet.probability > 0.35) {
+              topResult = topMobilenet;
+              isMobilenetOverride = true;
+            }
+          }
         }
 
         setRawPrediction(`${topResult.className} (${(topResult.probability * 100).toFixed(0)}%)`);
 
         if (isFruitResult) {
-          // All classes in fruit model are fruits (Apple, Banana, Orange) -> Organic (Hữu cơ)
           mappedResult = {
             bin_type: "hữu cơ" as const,
             explanation: "Đây là thùng rác Hữu cơ dùng để chứa các loại rác dễ phân hủy để ủ thành phân bón cho cây trồng."
+          };
+        } else if (isMobilenetOverride) {
+          mappedResult = {
+            bin_type: "hữu cơ" as const,
+            explanation: `Phát hiện vật thể hữu cơ (${topResult.className}). Đây là rác Hữu cơ dùng làm phân bón hữu cơ.`
           };
         } else {
           // Map the general waste class name using our helper
@@ -536,7 +563,7 @@ export default function App() {
         )}
 
         {/* Full-screen Model Loading Overlay */}
-        {!classifier && !useSimulatedAI && (
+        {(!classifier || !mobilenetClassifier) && !useSimulatedAI && (
           <div className="absolute inset-0 bg-[#f0fdf4]/98 backdrop-blur-lg z-50 flex flex-col items-center justify-center gap-5 animate-fade-in" id="model-loading-overlay">
             <div className="relative">
               <div className="w-28 h-28 sm:w-32 sm:h-32 border-[10px] border-emerald-100 border-t-emerald-500 rounded-full animate-spin shadow-lg"></div>
