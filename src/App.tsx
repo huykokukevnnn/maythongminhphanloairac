@@ -149,7 +149,7 @@ const TrashBinSvg = ({
 export default function App() {
   const [classifier, setClassifier] = useState<any>(null);
   const [modelLoadingProgress, setModelLoadingProgress] = useState<string>("Mô hình AI đang khởi động...");
-  const [useSimulatedAI, setUseSimulatedAI] = useState<boolean>(true);
+  const [useSimulatedAI, setUseSimulatedAI] = useState<boolean>(false);
   const [selectedPreset, setSelectedPreset] = useState<string | null>(null);
   const [modelError, setModelError] = useState<string | null>(null);
 
