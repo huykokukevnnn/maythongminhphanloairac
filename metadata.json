@@ -1,0 +1,6 @@
+{
+  "name": "Máy phân loại rác",
+  "description": "Ứng dụng giáo dục thông minh giúp phân loại rác vô cơ, hữu cơ và tái chế qua webcam dành cho học sinh.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
