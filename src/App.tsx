@@ -155,6 +155,8 @@ export default function App() {
     async function initClassifier() {
       try {
         env.allowLocalModels = false;
+        // Load ONNX WASM binaries from local path on our own domain instead of CDN (which is blocked in Vietnam)
+        env.backends.onnx.wasm.wasmPaths = "/";
         const pipe = await pipeline("image-classification", "Xenova/mobilenet_v1_1.0_224", {
           progress_callback: (data: any) => {
             if (data.status === "progress") {
