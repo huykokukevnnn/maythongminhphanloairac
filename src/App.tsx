@@ -166,6 +166,8 @@ export default function App() {
   const [modelError, setModelError] = useState<string | null>(null);
   const [rawPrediction, setRawPrediction] = useState<string | null>(null);
   const [captureProgress, setCaptureProgress] = useState<number>(0);
+  const [isCapturing, setIsCapturing] = useState<boolean>(false);
+  const [shutterActive, setShutterActive] = useState<boolean>(false);
 
   // Load model once on mount
 
@@ -332,28 +334,6 @@ export default function App() {
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
 
-    // Fetch snapshot directly from webcam canvas element if camera is active
-    if (activeTab === "webcam" && videoRef.current && !picData) {
-      const video = videoRef.current;
-      const tempCanvas = document.createElement("canvas");
-      tempCanvas.width = video.videoWidth || 640;
-      tempCanvas.height = video.videoHeight || 480;
-      const ctx = tempCanvas.getContext("2d");
-      if (ctx) {
-        ctx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
-        picData = tempCanvas.toDataURL("image/jpeg", 0.9);
-        setCapturedImage(picData);
-        stopCamera();
-      }
-    }
-
-    if (!picData) {
-      setAnalysisError("Chưa có ảnh vật phẩm. Vui lòng bật webcam chụp hình hoặc chọn ảnh từ mục 'Vật mẫu' nhé!");
-      return;
-    }
-
-    setIsAnalyzing(true);
-    setCaptureProgress(0);
     try {
       let mappedResult;
 
@@ -361,6 +341,7 @@ export default function App() {
       // because 2D canvas emojis are not recognized by real camera-trained models.
       // This ensures presets always output 100% correct answers.
       if (activeTab === "presets" && selectedPreset) {
+        setIsAnalyzing(true);
         setRawPrediction("Vật mẫu: " + selectedPreset.split('_').slice(1).join(' '));
         if (selectedPreset.startsWith("organic")) {
           mappedResult = {
@@ -379,7 +360,7 @@ export default function App() {
           };
         }
       } else if (useSimulatedAI) {
-        // Simulated AI mapping for webcam (random / cycle)
+        setIsAnalyzing(true);
         setRawPrediction("Mô phỏng (Simulation)");
         const types = ["tái chế", "hữu cơ", "vô cơ"] as const;
         const randomType = types[Math.floor(Math.random() * types.length)];
@@ -402,6 +383,7 @@ export default function App() {
 
         // Take 10 rapid pictures from the live camera stream
         if (activeTab === "webcam" && videoRef.current && !capturedImage) {
+          setIsCapturing(true);
           const video = videoRef.current;
           const tempCanvas = document.createElement("canvas");
           tempCanvas.width = video.videoWidth || 640;
@@ -410,6 +392,10 @@ export default function App() {
           if (ctx) {
             for (let i = 0; i < 10; i++) {
               setCaptureProgress(i + 1);
+              // Camera shutter blink flash effect
+              setShutterActive(true);
+              setTimeout(() => setShutterActive(false), 50);
+
               ctx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
               const frameData = tempCanvas.toDataURL("image/jpeg", 0.85);
               
@@ -429,6 +415,7 @@ export default function App() {
             }
             setCapturedImage(finalPicData);
             stopCamera();
+            setIsCapturing(false);
           }
         } else if (picData) {
           // If we already have static photo or uploaded preset image
@@ -440,6 +427,8 @@ export default function App() {
           throw new Error("Không thu thập được khung hình nào từ camera để phân tích.");
         }
 
+        // Show full-screen analyzing overlay ONLY after capturing completes
+        setIsAnalyzing(true);
         setCaptureProgress(10); // Start processing phase
 
         // Aggregate predictions over all frames
@@ -674,25 +663,12 @@ export default function App() {
           <div className="absolute inset-0 bg-[#f0fdf4]/95 backdrop-blur-md z-50 flex flex-col items-center justify-center gap-5 animate-fade-in" id="full-viewport-loading-overlay">
             <div className="relative">
               <div className="w-28 h-28 sm:w-32 sm:h-32 border-[10px] border-emerald-100 border-t-emerald-500 rounded-full animate-spin shadow-lg animate-pulse"></div>
-              <div className="absolute inset-0 flex items-center justify-center text-5xl sm:text-6xl animate-bounce">📸</div>
+              <div className="absolute inset-0 flex items-center justify-center text-5xl sm:text-6xl animate-bounce">🤖</div>
             </div>
             
-            <p className="text-xl sm:text-2xl font-black text-emerald-950 text-center max-w-sm sm:max-w-xl px-6 leading-normal uppercase tracking-wider">
-              {captureProgress > 0 && captureProgress < 10 ? (
-                <span>📸 ĐANG CHỤP KHUNG HÌNH LIÊN TỤC... ({captureProgress}/10)</span>
-              ) : (
-                <span>🤖 AI ĐANG PHÂN TÍCH TỔNG HỢP 10 ẢNH...</span>
-              )}
+            <p className="text-xl sm:text-2xl font-black text-emerald-950 text-center max-w-sm sm:max-w-xl px-6 leading-normal uppercase tracking-wider animate-pulse">
+              🤖 MÁY THÔNG MINH ĐANG PHÂN TÍCH...
             </p>
-
-            {captureProgress > 0 && (
-              <div className="w-64 h-5 bg-emerald-100 border-3 border-black rounded-full overflow-hidden shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] p-0.5 relative">
-                <div 
-                  className="h-full bg-emerald-500 rounded-full transition-all duration-150" 
-                  style={{ width: `${(captureProgress / 10) * 100}%` }}
-                />
-              </div>
-            )}
           </div>
         )}
 
@@ -823,10 +799,22 @@ export default function App() {
                       />
                       
                       {/* Glimpse live red dot */}
-                      <div className="absolute top-3 left-3 bg-red-600 text-white border-2 border-black px-2 py-0.5 rounded-lg text-[9px] font-black flex items-center gap-1 shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] animate-pulse">
+                      <div className="absolute top-3 left-3 bg-red-600 text-white border-2 border-black px-2 py-0.5 rounded-lg text-[9px] font-black flex items-center gap-1 shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] z-10 animate-pulse">
                         <span className="w-1.5 h-1.5 bg-white rounded-full animate-ping" />
                         LIVE CAM
                       </div>
+
+                      {/* Capturing counter pill overlay */}
+                      {isCapturing && (
+                        <div className="absolute top-3 right-3 bg-rose-500 text-white border-2 border-black px-3 py-1 rounded-xl text-xs font-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] z-20 animate-pulse">
+                          📸 ĐANG CHỤP: {captureProgress}/10
+                        </div>
+                      )}
+
+                      {/* Shutter flash effect */}
+                      {shutterActive && (
+                        <div className="absolute inset-0 bg-white/75 transition-opacity duration-75 z-30 pointer-events-none" />
+                      )}
 
                       {cameraError && (
                         <div className="absolute inset-0 bg-stone-950/95 text-white flex flex-col items-center justify-center p-3 text-center gap-1.5">
