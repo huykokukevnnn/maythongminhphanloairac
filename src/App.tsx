@@ -147,6 +147,15 @@ const TrashBinSvg = ({
   );
 };
 
+const loadImage = (src: string): Promise<HTMLImageElement> => {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.src = src;
+    img.onload = () => resolve(img);
+    img.onerror = (e) => reject(e);
+  });
+};
+
 export default function App() {
   const [classifier, setClassifier] = useState<any>(null);
   const [fruitClassifier, setFruitClassifier] = useState<any>(null);
@@ -156,6 +165,7 @@ export default function App() {
   const [selectedPreset, setSelectedPreset] = useState<string | null>(null);
   const [modelError, setModelError] = useState<string | null>(null);
   const [rawPrediction, setRawPrediction] = useState<string | null>(null);
+  const [captureProgress, setCaptureProgress] = useState<number>(0);
 
   // AI Simulator Userflow States
   const [appMode, setAppMode] = useState<"training" | "testing">("training");
@@ -348,6 +358,7 @@ export default function App() {
     }
 
     setIsAnalyzing(true);
+    setCaptureProgress(0);
     try {
       let mappedResult;
 
@@ -391,44 +402,103 @@ export default function App() {
           throw new Error("Mô hình AI chưa sẵn sàng. Vui lòng tải lại trang hoặc đợi trong giây lát.");
         }
 
-        // Convert base64 data to an HTML Image element to pass to Teachable Machine
-        const imgElement = new Image();
-        imgElement.src = picData;
-        await new Promise((resolve, reject) => {
-          imgElement.onload = resolve;
-          imgElement.onerror = () => reject(new Error("Không thể nạp dữ liệu hình ảnh vào mô hình."));
-        });
+        let frames: HTMLImageElement[] = [];
+        let finalPicData = picData;
 
-        // Run predictions from General, Fruit and MobileNet models
-        const generalPredictions = await classifier.predict(imgElement);
-        const fruitPredictions = await fruitClassifier.predict(imgElement);
-        const mobilenetPredictions = await mobilenetClassifier.classify(imgElement);
-
-        if (!generalPredictions || generalPredictions.length === 0) {
-          throw new Error("Không nhận diện được vật thể từ mô hình AI.");
+        // Take 10 rapid pictures from the live camera stream
+        if (activeTab === "webcam" && videoRef.current && !capturedImage) {
+          const video = videoRef.current;
+          const tempCanvas = document.createElement("canvas");
+          tempCanvas.width = video.videoWidth || 640;
+          tempCanvas.height = video.videoHeight || 480;
+          const ctx = tempCanvas.getContext("2d");
+          if (ctx) {
+            for (let i = 0; i < 10; i++) {
+              setCaptureProgress(i + 1);
+              ctx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
+              const frameData = tempCanvas.toDataURL("image/jpeg", 0.85);
+              
+              // Frame 5 serves as our preview thumbnail in UI
+              if (i === 4) {
+                finalPicData = frameData;
+              }
+              
+              const img = await loadImage(frameData);
+              frames.push(img);
+              
+              // 80ms interval between shots
+              await new Promise((resolve) => setTimeout(resolve, 80));
+            }
+            if (!finalPicData) {
+              finalPicData = tempCanvas.toDataURL("image/jpeg", 0.85);
+            }
+            setCapturedImage(finalPicData);
+            stopCamera();
+          }
+        } else if (picData) {
+          // If we already have static photo or uploaded preset image
+          const img = await loadImage(picData);
+          frames.push(img);
         }
 
-        // Sort both prediction lists descending by probability
-        generalPredictions.sort((a: any, b: any) => b.probability - a.probability);
-        fruitPredictions.sort((a: any, b: any) => b.probability - a.probability);
+        if (frames.length === 0) {
+          throw new Error("Không thu thập được khung hình nào từ camera để phân tích.");
+        }
 
-        const topGeneral = generalPredictions[0];
-        const topFruit = fruitPredictions[0];
-        const topMobilenet = mobilenetPredictions && mobilenetPredictions[0];
+        setCaptureProgress(10); // Start processing phase
+
+        // Aggregate predictions over all frames
+        let aggGeneral: { [key: string]: number } = {};
+        let aggFruit: { [key: string]: number } = {};
+        let aggMobilenet: { [key: string]: number } = {};
+
+        for (const imgEl of frames) {
+          const generalPredictions = await classifier.predict(imgEl);
+          const fruitPredictions = await fruitClassifier.predict(imgEl);
+          const mobilenetPredictions = await mobilenetClassifier.classify(imgEl);
+
+          generalPredictions.forEach((p: any) => {
+            aggGeneral[p.className] = (aggGeneral[p.className] || 0) + p.probability;
+          });
+          fruitPredictions.forEach((p: any) => {
+            aggFruit[p.className] = (aggFruit[p.className] || 0) + p.probability;
+          });
+          mobilenetPredictions.forEach((p: any) => {
+            aggMobilenet[p.className] = (aggMobilenet[p.className] || 0) + p.probability;
+          });
+        }
+
+        const numFrames = frames.length;
+        const generalList = Object.keys(aggGeneral).map(className => ({
+          className,
+          probability: aggGeneral[className] / numFrames
+        })).sort((a, b) => b.probability - a.probability);
+
+        const fruitList = Object.keys(aggFruit).map(className => ({
+          className,
+          probability: aggFruit[className] / numFrames
+        })).sort((a, b) => b.probability - a.probability);
+
+        const mobilenetList = Object.keys(aggMobilenet).map(className => ({
+          className,
+          probability: aggMobilenet[className] / numFrames
+        })).sort((a, b) => b.probability - a.probability);
+
+        const topGeneral = generalList[0];
+        const topFruit = fruitList[0];
+        const topMobilenet = mobilenetList && mobilenetList[0];
 
         let topResult = topGeneral;
         let isFruitResult = false;
         let isMobilenetOverride = false;
 
         // Ensemble logic: Compare confidence scores.
-        // If the specialized fruit model is highly confident (> 50%) and has more confidence
-        // than the general waste model, classify it as fruit (Hữu cơ).
         if (topFruit && topFruit.probability > 0.50 && topFruit.probability > topGeneral.probability) {
           topResult = topFruit;
           isFruitResult = true;
         }
 
-        // Standard MobileNet v2 override for other organic items (melons, squashes, vegetables, etc.)
+        // Standard MobileNet v2 override for other organic items
         if (!isFruitResult && topMobilenet && topMobilenet.probability > 0.20) {
           const mobilenetMapped = mapLabelToBin(topMobilenet.className);
           if (mobilenetMapped.bin_type === "hữu cơ") {
@@ -613,12 +683,26 @@ export default function App() {
         {isAnalyzing && (
           <div className="absolute inset-0 bg-[#f0fdf4]/95 backdrop-blur-md z-50 flex flex-col items-center justify-center gap-5 animate-fade-in" id="full-viewport-loading-overlay">
             <div className="relative">
-              <div className="w-28 h-28 sm:w-32 sm:h-32 border-[10px] border-emerald-100 border-t-emerald-500 rounded-full animate-spin shadow-lg"></div>
-              <div className="absolute inset-0 flex items-center justify-center text-5xl sm:text-6xl animate-bounce">🤖</div>
+              <div className="w-28 h-28 sm:w-32 sm:h-32 border-[10px] border-emerald-100 border-t-emerald-500 rounded-full animate-spin shadow-lg animate-pulse"></div>
+              <div className="absolute inset-0 flex items-center justify-center text-5xl sm:text-6xl animate-bounce">📸</div>
             </div>
-            <p className="text-2xl sm:text-3xl font-black text-emerald-950 animate-pulse text-center max-w-sm sm:max-w-xl px-6 leading-normal uppercase tracking-wider">
-              🤖 AI đang phân tích & tìm nắp thùng rác phù hợp...
+            
+            <p className="text-xl sm:text-2xl font-black text-emerald-950 text-center max-w-sm sm:max-w-xl px-6 leading-normal uppercase tracking-wider">
+              {captureProgress > 0 && captureProgress < 10 ? (
+                <span>📸 ĐANG CHỤP KHUNG HÌNH LIÊN TỤC... ({captureProgress}/10)</span>
+              ) : (
+                <span>🤖 AI ĐANG PHÂN TÍCH TỔNG HỢP 10 ẢNH...</span>
+              )}
             </p>
+
+            {captureProgress > 0 && (
+              <div className="w-64 h-5 bg-emerald-100 border-3 border-black rounded-full overflow-hidden shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] p-0.5 relative">
+                <div 
+                  className="h-full bg-emerald-500 rounded-full transition-all duration-150" 
+                  style={{ width: `${(captureProgress / 10) * 100}%` }}
+                />
+              </div>
+            )}
           </div>
         )}
 
