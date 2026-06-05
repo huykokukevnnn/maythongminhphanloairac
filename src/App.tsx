@@ -157,6 +157,13 @@ export default function App() {
   const [modelError, setModelError] = useState<string | null>(null);
   const [rawPrediction, setRawPrediction] = useState<string | null>(null);
 
+  // AI Simulator Userflow States
+  const [appMode, setAppMode] = useState<"training" | "testing">("training");
+  const [userStep, setUserStep] = useState<number>(1);
+  const [trainedSampleCount, setTrainedSampleCount] = useState<number>(0);
+  const [objectName, setObjectName] = useState<string>("");
+  const [selectedBinType, setSelectedBinType] = useState<"vô cơ" | "tái chế" | "hữu cơ" | null>(null);
+
   // Load model once on mount
   useEffect(() => {
     async function initClassifier() {
@@ -266,6 +273,43 @@ export default function App() {
     }
     return () => stopCamera();
   }, [activeTab, capturedImage]);
+
+  // Capture snapshot without running AI, for Training Mode
+  const captureSnapshotOnly = async () => {
+    setAnalysisError(null);
+    let picData = capturedImage;
+
+    if (capturedImage && activeTab === "webcam") {
+      setCapturedImage(null);
+      picData = null;
+      await startCamera();
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+
+    if (activeTab === "webcam" && videoRef.current && !picData) {
+      const video = videoRef.current;
+      const tempCanvas = document.createElement("canvas");
+      tempCanvas.width = video.videoWidth || 640;
+      tempCanvas.height = video.videoHeight || 480;
+      const ctx = tempCanvas.getContext("2d");
+      if (ctx) {
+        ctx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
+        picData = tempCanvas.toDataURL("image/jpeg", 0.9);
+        setCapturedImage(picData);
+        stopCamera();
+      }
+    }
+
+    if (!picData) {
+      setAnalysisError("Chưa có ảnh vật phẩm. Vui lòng bật webcam chụp hình hoặc chọn ảnh từ mục 'Vật mẫu' nhé!");
+      return;
+    }
+
+    if (appMode === "training") {
+      if (userStep === 1) setUserStep(2);
+      if (userStep === 6) setUserStep(7);
+    }
+  };
 
   // Capture static frames directly from the live feed and push to server
   const captureAndClassify = async () => {
@@ -533,6 +577,11 @@ export default function App() {
     setPoints(0);
     setStreak(0);
     setHistory([]);
+    setAppMode("training");
+    setUserStep(1);
+    setTrainedSampleCount(0);
+    setObjectName("");
+    setSelectedBinType(null);
     if (activeTab === "webcam") startCamera();
   };
 
@@ -541,6 +590,17 @@ export default function App() {
     setClassification(null);
     setAnalysisError(null);
     if (activeTab === "webcam") startCamera();
+  };
+
+  const handleBinClick = (type: "vô cơ" | "tái chế" | "hữu cơ") => {
+    if (appMode === "training") {
+      if (userStep === 2 || userStep === 7) {
+        setSelectedBinType(type);
+        setClassification({ bin_type: type, explanation: "Đã chọn nhóm: " + type });
+        if (userStep === 2) setUserStep(3);
+        if (userStep === 7) setUserStep(8);
+      }
+    }
   };
 
   return (
@@ -867,51 +927,57 @@ export default function App() {
             </div>
 
             {/* Functional snap buttons / triggers row */}
-            <div className="flex flex-col gap-3 mt-1 flex-shrink-0" id="core-interactive-triggers">
-              {capturedImage ? (
-                classification ? (
-                  // Case 3: analyzed successfully, let the user scan another
+            <div className="flex gap-3 mt-1 flex-shrink-0" id="core-interactive-triggers">
+              {appMode === "training" ? (
+                <>
                   <button
-                    onClick={resetCameraOnly}
-                    className="w-full border-4 border-black text-black font-black text-sm tracking-wider py-4 rounded-2xl flex items-center justify-center gap-1.5 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:bg-yellow-300 hover:scale-[1.02] active:translate-x-0.5 active:translate-y-0.5 transition-all cursor-pointer bg-yellow-400 uppercase h-14 md:h-16"
-                    id="btn-trigger-reset-stage1"
+                    onClick={captureSnapshotOnly}
+                    className={`flex-1 border-3 border-black text-black font-black text-sm tracking-wider py-4 rounded-2xl flex items-center justify-center gap-2 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] transition-all bg-amber-400 hover:bg-amber-300 uppercase ${
+                      userStep === 1 || userStep === 6 ? 'blink-red-focus' : ''
+                    }`}
                   >
-                    <RefreshCw className="w-5 h-5 text-stone-800" />
-                    Chụp Tiếp / Quay Lại
+                    <Camera className="w-5 h-5" /> CHỤP HÌNH
                   </button>
-                ) : (
-                  // Case 2: image is loaded (via preset or upload) but not analyzed yet
-                  <div className="grid grid-cols-2 gap-3 w-full">
-                    <button
-                      onClick={resetCameraOnly}
-                      className="border-3 border-black text-stone-800 font-black text-xs tracking-wider py-4 rounded-2xl flex items-center justify-center gap-1.5 bg-white shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] hover:bg-stone-50 hover:scale-[1.02] active:translate-x-0.5 active:translate-y-0.5 transition-all cursor-pointer h-14 md:h-16 uppercase text-center"
-                      id="btn-choose-other-stage1"
-                    >
-                      <RefreshCw className="w-4 h-4 text-emerald-600" />
-                      Chọn Lại
-                    </button>
-                    <button
-                      onClick={captureAndClassify}
-                      disabled={isAnalyzing}
-                      className="border-3 border-black text-white font-black text-xs tracking-wider py-4 rounded-2xl flex items-center justify-center gap-1.5 shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] hover:scale-[1.02] hover:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] active:translate-x-0.5 active:translate-y-0.5 transition-all cursor-pointer bg-emerald-500 hover:bg-emerald-400 uppercase h-14 md:h-16"
-                      id="btn-trigger-ai-presets-stage1"
-                    >
-                      <Sparkles className="w-4 h-4 text-emerald-100" />
-                      Phân Tích Ảnh
-                    </button>
-                  </div>
-                )
+                  <button
+                    onClick={() => {
+                       resetCameraOnly();
+                       setSelectedBinType(null);
+                       setObjectName("");
+                       setClassification(null);
+                       if (userStep === 5) {
+                          setUserStep(6);
+                       }
+                    }}
+                    className={`flex-1 border-3 border-black text-stone-800 font-black text-sm tracking-wider py-4 rounded-2xl flex items-center justify-center gap-2 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] transition-all bg-white hover:bg-stone-50 uppercase ${
+                      userStep === 5 ? 'blink-red-focus' : ''
+                    }`}
+                  >
+                    <RefreshCw className="w-5 h-5" /> THÊM MẪU KHÁC
+                  </button>
+                </>
               ) : (
-                // Case 1: Live webcam is running, snapshot ready
-                <button
-                  onClick={captureAndClassify}
-                  disabled={isAnalyzing}
-                  className="w-full border-4 border-black text-white font-black text-sm tracking-wider py-4 rounded-2xl flex items-center justify-center gap-2 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:scale-[1.03] hover:shadow-[5px_5px_0px_0px_rgba(0,0,0,1)] active:translate-x-0.5 active:translate-y-0.5 transition-all cursor-pointer bg-rose-500 hover:bg-rose-400 uppercase h-14 md:h-16"
-                  id="btn-trigger-ai-start-stage1"
-                >
-                  <Camera className="w-5 h-5 animate-pulse" />
-                  CHỤP & PHÂN TÍCH
-                </button>
+                <>
+                  <button
+                    onClick={() => {
+                      captureAndClassify();
+                    }}
+                    disabled={isAnalyzing}
+                    className={`flex-1 border-3 border-black text-white font-black text-sm tracking-wider py-4 rounded-2xl flex items-center justify-center gap-2 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] transition-all bg-blue-500 hover:bg-blue-400 uppercase ${
+                      userStep === 11 ? 'blink-red-focus' : ''
+                    }`}
+                  >
+                    <Sparkles className="w-5 h-5" /> CHỤP & KIỂM TRA
+                  </button>
+                  <button
+                    onClick={() => {
+                      resetCameraOnly();
+                      setClassification(null);
+                    }}
+                    className={`flex-1 border-3 border-black text-stone-800 font-black text-sm tracking-wider py-4 rounded-2xl flex items-center justify-center gap-2 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] transition-all bg-white hover:bg-stone-50 uppercase`}
+                  >
+                    <RefreshCw className="w-5 h-5" /> THÊM MẪU KHÁC
+                  </button>
+                </>
               )}
             </div>
 
@@ -954,8 +1020,8 @@ export default function App() {
           <div className="md:col-span-12 lg:col-span-7 md:lg:col-span-7 flex flex-col gap-3 text-center h-full justify-between overflow-y-auto px-2 scrollbar-thin md:col-span-7" id="right-trash-panel">
             
             {/* Trash Bins Container */}
-            <div className="flex flex-col justify-center bg-emerald-50/50 border-4 border-black rounded-[32px] p-5 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] transition-all flex-grow h-full py-8 md:py-16" id="bins-side-by-side-layout">
-              <p className="text-center text-xs md:text-sm font-black text-emerald-800/80 bg-white/80 border-2 border-black py-2 px-4 rounded-full w-fit mx-auto shadow-sm uppercase tracking-wider mb-8 md:mb-12">
+            <div className={`flex flex-col justify-center bg-emerald-50/50 border-4 border-black rounded-[32px] p-5 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] transition-all flex-grow py-6 ${appMode === 'training' && (userStep === 2 || userStep === 7) ? 'blink-red-focus' : ''}`} id="bins-side-by-side-layout">
+              <p className="text-center text-xs md:text-sm font-black text-emerald-800/80 bg-white/80 border-2 border-black py-2 px-4 rounded-full w-fit mx-auto shadow-sm uppercase tracking-wider mb-6">
                 Thùng Rác Học Tập (Nắp thùng tự động mở khi AI tìm đúng nhóm!)
               </p>
 
@@ -965,7 +1031,7 @@ export default function App() {
                 <div className="relative flex flex-col items-center w-full">
                   {classification?.bin_type === "vô cơ" && !isAnalyzing && (
                     <div className="absolute bottom-[108%] left-1/2 -translate-x-1/2 w-48 md:w-64 bg-amber-50 border-3 border-black p-3 rounded-2xl shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] text-[10px] md:text-xs font-black text-slate-950 z-30 animate-bounce leading-relaxed text-center">
-                      {rawPrediction && <p className="text-[9px] text-amber-600 font-extrabold border-b border-black/10 pb-1 mb-1">AI nhận diện: {rawPrediction}</p>}
+                      {rawPrediction && appMode === "testing" && <p className="text-[9px] text-amber-600 font-extrabold border-b border-black/10 pb-1 mb-1">AI nhận diện: {rawPrediction}</p>}
                       <p>{classification.explanation}</p>
                       <div className="absolute top-full left-1/2 -translate-x-1/2 border-[10px] border-transparent border-t-black mt-[-1.5px]" />
                       <div className="absolute top-full left-1/2 -translate-x-1/2 border-[8px] border-transparent border-t-amber-50 mt-[-3px]" />
@@ -975,6 +1041,7 @@ export default function App() {
                     type="vô cơ"
                     isOpen={classification?.bin_type === "vô cơ"}
                     isHighlighted={classification?.bin_type === "vô cơ"}
+                    onClick={() => handleBinClick("vô cơ")}
                   />
                 </div>
 
@@ -982,7 +1049,7 @@ export default function App() {
                 <div className="relative flex flex-col items-center w-full">
                   {classification?.bin_type === "tái chế" && !isAnalyzing && (
                     <div className="absolute bottom-[108%] left-1/2 -translate-x-1/2 w-48 md:w-64 bg-amber-50 border-3 border-black p-3 rounded-2xl shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] text-[10px] md:text-xs font-black text-slate-950 z-30 animate-bounce leading-relaxed text-center">
-                      {rawPrediction && <p className="text-[9px] text-amber-600 font-extrabold border-b border-black/10 pb-1 mb-1">AI nhận diện: {rawPrediction}</p>}
+                      {rawPrediction && appMode === "testing" && <p className="text-[9px] text-amber-600 font-extrabold border-b border-black/10 pb-1 mb-1">AI nhận diện: {rawPrediction}</p>}
                       <p>{classification.explanation}</p>
                       <div className="absolute top-full left-1/2 -translate-x-1/2 border-[10px] border-transparent border-t-black mt-[-1.5px]" />
                       <div className="absolute top-full left-1/2 -translate-x-1/2 border-[8px] border-transparent border-t-amber-50 mt-[-3px]" />
@@ -1005,6 +1072,7 @@ export default function App() {
                     type="tái chế"
                     isOpen={classification?.bin_type === "tái chế"}
                     isHighlighted={classification?.bin_type === "tái chế"}
+                    onClick={() => handleBinClick("tái chế")}
                   />
                 </div>
 
@@ -1012,7 +1080,7 @@ export default function App() {
                 <div className="relative flex flex-col items-center w-full">
                   {classification?.bin_type === "hữu cơ" && !isAnalyzing && (
                     <div className="absolute bottom-[108%] left-1/2 -translate-x-1/2 w-48 md:w-64 bg-amber-50 border-3 border-black p-3 rounded-2xl shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] text-[10px] md:text-xs font-black text-slate-950 z-30 animate-bounce leading-relaxed text-center">
-                      {rawPrediction && <p className="text-[9px] text-amber-600 font-extrabold border-b border-black/10 pb-1 mb-1">AI nhận diện: {rawPrediction}</p>}
+                      {rawPrediction && appMode === "testing" && <p className="text-[9px] text-amber-600 font-extrabold border-b border-black/10 pb-1 mb-1">AI nhận diện: {rawPrediction}</p>}
                       <p>{classification.explanation}</p>
                       <div className="absolute top-full left-1/2 -translate-x-1/2 border-[10px] border-transparent border-t-black mt-[-1.5px]" />
                       <div className="absolute top-full left-1/2 -translate-x-1/2 border-[8px] border-transparent border-t-amber-50 mt-[-3px]" />
@@ -1022,9 +1090,79 @@ export default function App() {
                     type="hữu cơ"
                     isOpen={classification?.bin_type === "hữu cơ"}
                     isHighlighted={classification?.bin_type === "hữu cơ"}
+                    onClick={() => handleBinClick("hữu cơ")}
                   />
                 </div>
 
+              </div>
+            </div>
+
+            {/* Object Name Entry Card (Middle) */}
+            <div className="bg-[#fef08a] border-3 border-black p-3 rounded-2xl shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] flex flex-col gap-2 relative">
+              <p className="font-black text-sm uppercase flex items-center gap-2">
+                <span>🏷️</span> Tên đồ vật
+              </p>
+              <div className={`relative flex items-center bg-white border-2 border-black rounded-xl p-2 ${appMode === 'training' && (userStep === 3 || userStep === 8) ? 'blink-red-focus' : ''}`}>
+                <span className="pl-1 pr-2">📝</span>
+                <input 
+                  type="text" 
+                  value={objectName}
+                  onChange={(e) => {
+                    setObjectName(e.target.value);
+                    if (e.target.value.trim() !== "") {
+                      if (userStep === 3) setUserStep(4);
+                      if (userStep === 8) setUserStep(9);
+                    } else {
+                      if (userStep === 4) setUserStep(3);
+                      if (userStep === 9) setUserStep(8);
+                    }
+                  }}
+                  disabled={appMode === "testing" || (userStep < 3 && userStep !== 8 && userStep !== 9)}
+                  placeholder={appMode === "testing" ? "🔒 Chuyển sang Dạy để nhập tên đồ vật..." : "gõ tên món rác vào đây..."}
+                  className="w-full bg-transparent outline-none font-bold text-sm text-slate-800 disabled:opacity-60"
+                />
+              </div>
+            </div>
+
+            {/* AI Training Panel (Bottom) */}
+            <div className="bg-white/80 border-3 border-black p-3 rounded-2xl shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] flex flex-col gap-3">
+              <div className="flex justify-between items-center">
+                <p className="font-black text-[11px] md:text-xs text-sky-800 uppercase flex items-center gap-1.5">
+                  <span>🚀</span> HUẤN LUYỆN AI
+                </p>
+                <button onClick={clearEverything} className="bg-yellow-400 border-2 border-black rounded-lg px-2 py-1 text-[9px] font-black uppercase shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] flex items-center gap-1 hover:bg-yellow-300">
+                  <RefreshCw className="w-3 h-3" /> LÀM MỚI LẠI
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <button 
+                  onClick={() => {
+                    if (appMode === "training" && (userStep === 4 || userStep === 9)) {
+                      setTrainedSampleCount(prev => prev + 1);
+                      if (userStep === 4) setUserStep(5);
+                      if (userStep === 9) setUserStep(10);
+                    }
+                  }}
+                  disabled={appMode === "testing" || (userStep !== 4 && userStep !== 9)}
+                  className={`border-3 border-black font-black text-sm py-3 rounded-2xl flex items-center justify-center gap-1.5 shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] uppercase transition-all ${
+                    appMode === "training" ? "bg-amber-400 text-black hover:bg-amber-300" : "bg-white text-stone-400 opacity-60"
+                  } ${appMode === 'training' && (userStep === 4 || userStep === 9) ? 'blink-red-focus' : ''}`}
+                >
+                  🏫 Dạy ({trainedSampleCount})
+                </button>
+                <button 
+                  onClick={() => {
+                    if (userStep === 10) {
+                      setAppMode("testing");
+                      setUserStep(11);
+                    }
+                  }}
+                  className={`border-3 border-black font-black text-sm py-3 rounded-2xl flex items-center justify-center gap-1.5 shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] uppercase transition-all ${
+                    appMode === "testing" ? "bg-blue-500 text-white hover:bg-blue-400" : "bg-white text-blue-600 hover:bg-blue-50"
+                  } ${userStep === 10 ? 'blink-red-focus' : ''}`}
+                >
+                  🧪 Kiểm tra
+                </button>
               </div>
             </div>
 
