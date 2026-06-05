@@ -168,6 +168,7 @@ export default function App() {
   const [captureProgress, setCaptureProgress] = useState<number>(0);
   const [isCapturing, setIsCapturing] = useState<boolean>(false);
   const [shutterActive, setShutterActive] = useState<boolean>(false);
+  const [capturedFrames, setCapturedFrames] = useState<string[]>([]);
 
   // Load model once on mount
 
@@ -322,6 +323,7 @@ export default function App() {
   const captureAndClassify = async () => {
     setAnalysisError(null);
     setClassification(null);
+    setCapturedFrames([]);
 
     let picData = capturedImage;
 
@@ -404,11 +406,14 @@ export default function App() {
                 finalPicData = frameData;
               }
               
+              // Append to captured frames strip
+              setCapturedFrames(prev => [...prev, frameData]);
+              
               const img = await loadImage(frameData);
               frames.push(img);
               
-              // 80ms interval between shots
-              await new Promise((resolve) => setTimeout(resolve, 80));
+              // 300ms interval between shots (slower capture)
+              await new Promise((resolve) => setTimeout(resolve, 300));
             }
             if (!finalPicData) {
               finalPicData = tempCanvas.toDataURL("image/jpeg", 0.85);
@@ -631,6 +636,7 @@ export default function App() {
     setPoints(0);
     setStreak(0);
     setHistory([]);
+    setCapturedFrames([]);
     if (activeTab === "webcam") startCamera();
   };
 
@@ -638,6 +644,7 @@ export default function App() {
     setCapturedImage(null);
     setClassification(null);
     setAnalysisError(null);
+    setCapturedFrames([]);
     if (activeTab === "webcam") startCamera();
   };
 
@@ -1027,6 +1034,25 @@ export default function App() {
                 </button>
               )}
             </div>
+
+            {/* Display captured frames in real-time under the capture buttons */}
+            {capturedFrames.length > 0 && (
+              <div className="bg-white/60 border-2 border-black border-dashed p-3 rounded-2xl flex flex-col gap-1.5 mt-2 animate-fade-in" id="captured-thumbnails-bar">
+                <p className="text-[10px] font-black text-emerald-950 uppercase tracking-wider flex items-center gap-1">
+                  <span>📸</span> Khung hình đã chụp ({capturedFrames.length}/10):
+                </p>
+                <div className="flex flex-wrap gap-1.5 justify-center md:justify-start">
+                  {capturedFrames.map((frame, index) => (
+                    <div 
+                      key={index}
+                      className="w-10 h-10 border-2 border-black rounded-lg overflow-hidden shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] bg-stone-200 transition-all duration-300 transform hover:scale-105"
+                    >
+                      <img src={frame} alt={`Frame ${index + 1}`} className="w-full h-full object-cover -scale-x-100" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {analysisError && (
               <div className="bg-red-50 border-3 border-red-500 rounded-2xl p-3 flex items-start gap-2 shadow-sm text-xs text-red-950 font-bold border-dashed">
